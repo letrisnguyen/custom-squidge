@@ -98,32 +98,29 @@ class Squidge_CLI extends WP_CLI_Command
 		$assoc_args['webp'] = filter_var($assoc_args['webp'], FILTER_VALIDATE_BOOLEAN);
 		$assoc_args['avif'] = filter_var($assoc_args['avif'], FILTER_VALIDATE_BOOLEAN);
 
-		$upload_dir = wp_get_upload_dir()['basedir'];
-		$image_files = [];
+		$query_images_args = array(
+			'post_type' => 'attachment',
+			'post_mime_type' => 'image',
+			'post_status' => 'inherit',
+			'posts_per_page' => -1,
+		);
 
-		$directory_iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($upload_dir));
-		foreach ($directory_iterator as $file) {
-			if ($file->isFile() && preg_match('/\.(jpg|jpeg|png)$/i', $file->getFilename())) {
-				$webp_file = $file->getPathname() . '.webp';
-				if (!file_exists($webp_file)) {
-					$image_files[] = $file->getPathname();
-				}
-			}
-		}
+		$query_images = new WP_Query($query_images_args);
 
-		foreach ($image_files as $file_path) {
+		foreach ($query_images->posts as $image) {
+			$id = $image->ID;
 			$image_args = [
 				'quality' => $assoc_args['quality'],
 				'optimization' => $assoc_args['optimization']
 			];
 
-			WP_CLI::log(WP_CLI::colorize("%BProcessing image: %n") . basename($file_path));
+			WP_CLI::log(WP_CLI::colorize("%BProcessing image: %n") . $image->post_title);
 
 			// WebP
 			if ($assoc_args['webp']) {
 				try {
 					WP_CLI::log('WebP Conversion...');
-					WebP::convert($file_path, WebP::get_mime_type($file_path), $image_args);
+					WebP::process($id, $image_args);
 				} catch (Exception $e) {
 					WP_CLI::error($e->getMessage());
 				}
@@ -133,7 +130,7 @@ class Squidge_CLI extends WP_CLI_Command
 			if ($assoc_args['avif']) {
 				try {
 					WP_CLI::log('AVIF Conversion...');
-					AVIF::convert($file_path, AVIF::get_mime_type($file_path), $image_args);
+					AVIF::process($id, $image_args);
 				} catch (Exception $e) {
 					WP_CLI::error($e->getMessage());
 				}
@@ -143,7 +140,7 @@ class Squidge_CLI extends WP_CLI_Command
 			if ($assoc_args['jpg']) {
 				try {
 					WP_CLI::log('JPG Compression...');
-					JPG::convert($file_path, JPG::get_mime_type($file_path), $image_args);
+					JPG::process($id, $image_args);
 				} catch (Exception $e) {
 					WP_CLI::error($e->getMessage());
 				}
@@ -153,13 +150,118 @@ class Squidge_CLI extends WP_CLI_Command
 			if ($assoc_args['png']) {
 				try {
 					WP_CLI::log('PNG Compression...');
-					PNG::convert($file_path, PNG::get_mime_type($file_path), $image_args);
+					PNG::process($id, $image_args);
 				} catch (Exception $e) {
 					WP_CLI::error($e->getMessage());
 				}
 			}
 
-			WP_CLI::success("Processed image: " . basename($file_path) . PHP_EOL);
+			WP_CLI::success("Processed image: " . $image->post_title . PHP_EOL);
+		}
+
+		wp_reset_postdata();
+
+		WP_CLI::success('Successfully processed images.');
+	}
+
+	/**
+	 * Processes all images from the WordPress uploaded files
+	 * and compresses & optimises.
+	 *
+	 * JPG and PNG Compression will be run and files will be
+	 * converted to .webp and .avif file formats.
+	 *
+	 * Args:
+	 *    - jpg=false  	 	 To disable JPG compression.
+	 *    - png=false   	 To disable PNG compression.
+	 *    - webp=false  	 To disable WebP conversion.
+	 *    - avif=false       To disable AVIF conversion.
+	 *    - quality=80   	 The quality of compression
+	 *    - optimization=02  Optimization of PNG images
+	 *
+	 * @param $args
+	 * @param $assoc_args
+	 * @since 0.1.0
+	 * @date 24/11/2021
+	 */
+	public function start($args, $assoc_args)
+	{
+		$this->print_welcome();
+
+		$assoc_args = wp_parse_args(
+			$assoc_args,
+			[
+				'quality' => 80,
+				'optimization' => 'o2',
+				'jpg' => true,
+				'png' => true,
+				'webp' => true,
+				'avif' => true,
+			]
+		);
+
+		$assoc_args['jpg'] = filter_var($assoc_args['jpg'], FILTER_VALIDATE_BOOLEAN);
+		$assoc_args['png'] = filter_var($assoc_args['png'], FILTER_VALIDATE_BOOLEAN);
+		$assoc_args['webp'] = filter_var($assoc_args['webp'], FILTER_VALIDATE_BOOLEAN);
+		$assoc_args['avif'] = filter_var($assoc_args['avif'], FILTER_VALIDATE_BOOLEAN);
+
+		$upload_dir = wp_get_upload_dir()['basedir'];
+
+		$directory_iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($upload_dir));
+		foreach ($directory_iterator as $file) {
+			if ($file->isFile() && preg_match('/\.(jpg|jpeg|png)$/i', $file->getFilename())) {
+				$webp_file = $file->getPathname() . '.webp';
+				if (!file_exists($webp_file)) {
+					$image_args = [
+						'quality' => $assoc_args['quality'],
+						'optimization' => $assoc_args['optimization']
+					];
+
+					WP_CLI::log(WP_CLI::colorize("%BProcessing image: %n") . basename($file->getPathname()));
+
+					// WebP
+					if ($assoc_args['webp']) {
+						try {
+							WP_CLI::log('WebP Conversion...');
+							WebP::convert($file->getPathname(), WebP::get_mime_type($file->getPathname()), $image_args);
+						} catch (Exception $e) {
+							WP_CLI::error($e->getMessage());
+						}
+					}
+
+					// Avif
+					if ($assoc_args['avif']) {
+						try {
+							WP_CLI::log('AVIF Conversion...');
+							AVIF::convert($file->getPathname(), AVIF::get_mime_type($file->getPathname()), $image_args);
+						} catch (Exception $e) {
+							WP_CLI::error($e->getMessage());
+						}
+					}
+
+					// JPG
+					if ($assoc_args['jpg']) {
+						try {
+							WP_CLI::log('JPG Compression...');
+							JPG::convert($file->getPathname(), JPG::get_mime_type($file->getPathname()), $image_args);
+						} catch (Exception $e) {
+							WP_CLI::error($e->getMessage());
+						}
+					}
+
+					// PNG
+					if ($assoc_args['png']) {
+						try {
+							WP_CLI::log('PNG Compression...');
+							PNG::convert($file->getPathname(), PNG::get_mime_type($file->getPathname()), $image_args);
+						} catch (Exception $e) {
+							WP_CLI::error($e->getMessage());
+						}
+					}
+
+					WP_CLI::success("Processed image: " . basename($file->getPathname()) . PHP_EOL);
+				}
+			}
 		}
 
 		wp_reset_postdata();
